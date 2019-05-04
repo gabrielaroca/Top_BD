@@ -1,0 +1,247 @@
+import codecs
+from timeit import timeit
+from math import sqrt
+from time import time
+
+users3 = {"David": {"Imagine Dragons": 3, "Daft Punk": 5, "Lorde": 4, "Fall Out Boy": 1},
+          "Matt": {"Imagine Dragons": 3, "Daft Punk": 4, "Lorde": 4, "Fall Out Boy": 1},
+          "Ben": {"Kacey Musgraves": 4, "Imagine Dragons": 3, "Lorde": 3, "Fall Out Boy": 1},
+          "Chris": {"Kacey Musgraves": 4, "Imagine Dragons": 4, "Daft Punk": 4, "Lorde": 3, "Fall Out Boy": 1},
+          "Torri": {"Kacey Musgraves": 5, "Imagine Dragons": 4, "Daft Punk": 5, "Fall Out Boy": 3}}
+
+users2 = {"Amy": {"Taylor Swift": 4, "PSY": 3, "Whitney Houston": 4},
+          "Ben": {"Taylor Swift": 5, "PSY": 2},
+          "Clara": {"PSY": 3.5, "Whitney Houston": 4},
+          "Daisy": {"Taylor Swift": 5, "Whitney Houston": 3}}
+
+def normalizar (users):
+   results = {}
+   normaliza = {}
+   for (key, ratings) in users.items():
+      arraT={}
+      for a in ratings:
+         r=ratings[a]
+         
+         norml=(2*(r-1)-(4))/4
+         
+         arraT.update( {a : norml} )
+      normaliza.update( {key : arraT} )
+
+   for (key, ratings) in normaliza.items():
+         print (key,"\n",ratings,"\n")
+    
+   return results
+print (normalizar(users3))
+
+class recommender:
+
+   def __init__(self, data, k=1, metric='pearson', n=5):
+      self.k = k
+      self.n = n
+      self.username2id = {}
+      self.userid2name = {}
+      self.productid2name = {}
+      self.frequencies = {}
+      self.deviations = {}
+      self.averageRating = {}
+      self.itemSimilarityNum = {}
+      self.itemSimilarityDen1 = {}
+      self.itemSimilarityDen2 = {}
+      if type(data).__name__ == 'dict':
+         self.data = data
+
+   def convertProductID2name(self, id):
+      if id in self.productid2name:
+         return self.productid2name[id]
+      else:
+         return id
+
+   def userRatings(self, id, n):
+       #calificaciones para los n usuarios
+      print ("Ratings for " + self.userid2name[id])
+      ratings = self.data[id]
+      print(len(ratings))
+      ratings = list(ratings.items())[:n]
+      ratings = [(self.convertProductID2name(k), v)
+                 for (k, v) in ratings]
+      ratings.sort(key=lambda artistTuple: artistTuple[1],
+                   reverse = True)      
+      for rating in ratings:
+         print("%s\t%i" % (rating[0], rating[1]))
+
+
+   def showUserTopItems(self, user, n):
+      #n top articulos
+      items = list(self.data[user].items())
+      items.sort(key=lambda itemTuple: itemTuple[1], reverse=True)
+      for i in range(n):
+         print("%s\t%i" % (self.convertProductID2name(items[i][0]),
+                           items[i][1]))
+            
+   def loadMovieLens(self, path='/Users/Lenovo/AppData/Local/Programs/Python/Python36-32/ml-100k/'):
+      self.data = {}
+      i = 0
+      f = codecs.open(path + "u.data", 'r', 'ascii')
+      for line in f:
+         i += 1
+         fields = line.split('\t')
+         user = fields[0]
+         movie = fields[1]
+         rating = int(fields[2].strip().strip('"'))
+         if user in self.data:
+            currentRatings = self.data[user]
+         else:
+            currentRatings = {}
+         currentRatings[movie] = rating
+         self.data[user] = currentRatings
+      f.close()
+      #Leemos movie en self.productid2name
+      #u.item = movie id, title, release date among
+      
+      f = codecs.open(path + "u.item", 'r', 'iso8859-1', 'ignore')
+      for line in f:
+         i += 1
+         fields = line.split('|')
+         mid = fields[0].strip()
+         title = fields[1].strip()
+         self.productid2name[mid] = title
+      f.close()
+      
+      #Leemos user en self.userid2name y and self.username2id
+      f = open(path + "u.user")
+      for line in f:
+         i += 1
+         fields = line.split('|')
+         userid = fields[0].strip('"')
+         self.userid2name[userid] = line
+         self.username2id[line] = userid
+      f.close()
+      print(i)
+       
+        
+   def computeDeviations(self):
+      #para cada persona en la data obtenemos su rating
+      for ratings in self.data.values():
+        for (item, rating) in ratings.items():
+            self.frequencies.setdefault(item, {})
+            self.deviations.setdefault(item, {})                    
+            # item2 calificacion a la segunda banda
+            for (item2, rating2) in ratings.items():
+               if item != item2:
+                  self.frequencies[item].setdefault(item2, 0)
+                  self.deviations[item].setdefault(item2, 0.0)
+                  self.frequencies[item][item2] += 1
+                  self.deviations[item][item2] += rating - rating2
+        #iteraramos desviaciones para dividir cada desviación por su frecuencia asociada
+      for (item, ratings) in self.deviations.items():
+         for item2 in ratings:
+            ratings[item2] /= self.frequencies[item][item2]
+
+   def slopeOneRecommendations(self, userRatings):
+      recommendations = {}
+      frequencies = {}
+      
+      for (userItem, userRating) in userRatings.items():
+         #cada musico calificado excepto{-j}
+         for (diffItem, diffRatings) in self.deviations.items():
+            if diffItem not in userRatings and \
+               userItem in self.deviations[diffItem]:# buscamos la desviacion para {-j}
+               freq = self.frequencies[diffItem][userItem]
+               recommendations.setdefault(diffItem, 0.0)
+               frequencies.setdefault(diffItem, 0)
+               #formula------
+               recommendations[diffItem] += (diffRatings[userItem] +
+                                             userRating) * freq
+               
+               frequencies[diffItem] += freq
+      recommendations =  [(self.convertProductID2name(k),
+                           v / frequencies[k])
+                          for (k, v) in recommendations.items()]
+      
+      recommendations.sort(key=lambda artistTuple: artistTuple[1],
+                           reverse = True)
+      
+      return recommendations[:50]
+          
+   def computeSimilarity(self):
+        for (item, ratings) in self.data.items():
+            self.averageRating[item] = (float(sum(ratings.values())) / len(ratings.values()))
+
+        for (user, ratings) in self.data.items():
+            for (item, rating) in ratings.items():
+                self.itemSimilarityNum.setdefault(item, {})
+                self.itemSimilarityDen1.setdefault(item, {})
+                self.itemSimilarityDen2.setdefault(item, {})
+                for (item2, rating2) in ratings.items():
+                    if item != item2:
+                        avg = self.averageRating[user]
+                        self.itemSimilarityNum[item].setdefault(item2, 0.0)
+                        self.itemSimilarityDen1[item].setdefault(item2, 0.0)
+                        self.itemSimilarityDen2[item].setdefault(item2, 0.0)
+                        self.itemSimilarityNum[item][item2] += (ratings[item] - avg) * (ratings[item2] - avg)
+                        self.itemSimilarityDen1[item][item2] += (ratings[item] - avg) ** 2
+                        self.itemSimilarityDen2[item][item2] += (ratings[item2] - avg) ** 2
+
+        for (item, ratings) in self.itemSimilarityNum.items():
+            for item2 in ratings:
+                denominador = sqrt(self.itemSimilarityDen1[item][item2]) * sqrt(self.itemSimilarityDen2[item][item2])
+                if denominador == 0:
+                    ratings[item2] = 0
+                else:
+                    ratings[item2] /= denominador
+
+
+   def SimilarityCoseno(self, user_id):
+        userRatings = self.data[user_id]
+        recommendations = {}
+        similitudes = {}
+        for (userItem, userRating) in userRatings.items():
+            for (diffItem, diffRatings) in self.itemSimilarityNum.items():
+                if diffItem not in userRatings and \
+                        userItem in self.itemSimilarityNum[diffItem]:
+                    recommendations.setdefault(diffItem, 0.0)
+                    similitudes.setdefault(diffItem, 0)
+                    similitud = self.itemSimilarityNum[diffItem][userItem]
+                    recommendations[diffItem] += similitud * (((userRating - 1) * 0.5) - 1)
+                    similitudes[diffItem] += abs(similitud)
+
+        recommendations = [(self.convertProductID2name(k),
+                            (2 * ((v / similitudes[k]) + 1)) + 1)
+                           for (k, v) in recommendations.items()]
+        
+        recommendations.sort(key=lambda artistTuple: artistTuple[1],
+                             reverse=True)
+        
+        return recommendations[:50]
+   
+        
+'''   
+r = recommender(users2)
+r.computeDeviations()
+g = users2['Ben']
+print (r.slopeOneRecommendations(g))
+'''
+'''
+tiempo_inicial = time() 
+r = recommender(0)
+r.loadMovieLens('/Users/Lenovo/AppData/Local/Programs/Python/Python36-32/ml-100k/')
+#print("\n", r.showUserTopItems('1', 50))
+r.computeDeviations()
+print(r.slopeOneRecommendations(r.data['1']))
+tiempo_final = time()
+tiempo_ejecucion = tiempo_final - tiempo_inicial
+ 
+print ('El tiempo de ejecucion fue para slope one fue :',tiempo_ejecucion) 
+
+'''
+'''
+tiempo_inicial = time() 
+r = recommender(0)
+r.loadMovieLens('/Users/Lenovo/AppData/Local/Programs/Python/Python36-32/ml-100k/')
+r.computeSimilarity()
+print(r.SimilarityCoseno('1'))
+tiempo_final = time()
+tiempo_ejecucion = tiempo_final - tiempo_inicial
+ 
+print ('El tiempo de ejecucion fue para similitud del coseno :',tiempo_ejecucion) 
+'''
